@@ -33,7 +33,7 @@
   .ghost:hover{background:var(--panel-hi);color:var(--amber);border-color:var(--amber);}
 
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px;}
-  .phead{font-weight:700;font-size:15px;color:var(--amber);margin:0 0 18px;display:flex;justify-content:space-between;align-items:center;}
+  .phead{font-weight:700;font-size:15px;color:var(--amber);margin:0 0 18px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
   .phead .count{font-weight:500;color:var(--text-soft);font-size:13px;}
 
   .field{margin-bottom:15px;}
@@ -62,7 +62,7 @@
   .prev{display:flex;align-items:center;gap:13px;justify-content:center;}
   .prev img{width:70px;height:70px;object-fit:cover;border-radius:11px;border:1px solid var(--line);}
   .bar{height:5px;background:var(--steel);border-radius:100px;overflow:hidden;margin-top:12px;}
-  .bar span{display:block;height:100%;background:var(--amber);width:0;transition:width .2s ease;}
+  .bar span{display:block;height:100%;background:var(--amber);width:0;transition:width .25s ease;}
 
   .prod{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:#0E1216;transition:border-color .15s ease;}
   .prod:hover{border-color:var(--steel);}
@@ -83,6 +83,8 @@
 
   .empty{text-align:center;color:var(--text-soft);font-size:14px;padding:30px;}
   .editing{background:rgba(216,155,74,0.1);border:1px solid rgba(216,155,74,0.3);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--amber);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .warn{background:rgba(192,80,74,0.1);border:1px solid rgba(192,80,74,0.3);border-radius:10px;padding:11px 14px;font-size:12.5px;color:#E39A95;line-height:1.7;margin-bottom:14px;}
+  .ok-badge{font-size:11.5px;color:var(--green);font-weight:700;}
 </style>
 </head>
 <body>
@@ -96,8 +98,6 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, addDoc,
          updateDoc, deleteDoc, query, orderBy, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
-import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject }
-  from "https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBl1vIBlNKTXbVGQOUUQ7ZSCmQ1jka2_6Y",
@@ -112,13 +112,22 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
+
+/* ===== GitHub upload config ===== */
+const GH_OWNER = 'hazemfire80-crypto';
+const GH_REPO  = 'uploads';
+const GH_BRANCH = 'main';
+const TOKEN_KEY = 'gh_upload_token';
+
+const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
+const setToken = t => localStorage.setItem(TOKEN_KEY, t);
+const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
 let settings = { title:'', bio:'', avatar:'', tiktok:'', instagram:'' };
 let products = [];
 let editingId = null;
-let pendingImage = { url:'', path:'' };
-let pendingAvatar = { url:'', path:'' };
+let pendingImage = { url:'' };
+let pendingAvatar = { url:'' };
 
 const $ = id => document.getElementById(id);
 const esc = s => (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -127,7 +136,7 @@ function toast(msg, isErr){
   const t = $('toast');
   t.textContent = msg;
   t.className = 'toast show' + (isErr ? ' err' : '');
-  setTimeout(()=>t.className='toast', 2400);
+  setTimeout(()=>t.className='toast', 2600);
 }
 
 onAuthStateChanged(auth, user => user ? boot() : renderLogin());
@@ -168,6 +177,7 @@ async function boot(){
 
 function render(){
   const ed = editingId ? products.find(p=>p.id===editingId) : null;
+  const hasToken = !!getToken();
 
   $('app').innerHTML = `
     <div class="topbar">
@@ -175,6 +185,26 @@ function render(){
       <div class="acts-top">
         <a href="./index.html" target="_blank"><button class="ghost">الصفحة العامة ↗</button></a>
         <button class="ghost" id="logoutBtn">خروج</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="phead">
+        <span>إعدادات رفع الصور</span>
+        ${hasToken ? `<span class="ok-badge">✓ متصل</span>` : ''}
+      </div>
+      ${hasToken ? '' : `<div class="warn">لازم تحط توكين GitHub الأول عشان تقدر ترفع صور. التوكين بيتخزن في المتصفح ده بس ومش بيتكتب في كود الصفحة.</div>`}
+      <div class="field">
+        <label>توكين GitHub</label>
+        <input id="ghToken" type="password" placeholder="${hasToken ? '••••••••••  (محفوظ)' : 'ghp_...'}" dir="ltr">
+        <div class="hint">
+          الريبو: <span dir="ltr">${GH_OWNER}/${GH_REPO}</span> ·
+          صلاحية Contents: Read and write بس
+        </div>
+      </div>
+      <div class="grid2">
+        <button class="btn" id="saveToken">حفظ التوكين</button>
+        <button class="ghost" id="clearToken" style="padding:13px">مسح التوكين من المتصفح</button>
       </div>
     </div>
 
@@ -220,7 +250,7 @@ function render(){
           <div class="bar" id="prodBar" style="display:none"><span></span></div>
         </div>
         <input type="file" id="prodFile" accept="image/*" hidden>
-        <div class="hint">الصورة بتترفع من جهازك على طول وبتوصل لكل الناس</div>
+        <div class="hint">الصورة بتترفع على GitHub وبتوصل لكل الناس</div>
       </div>
 
       <div class="field"><label>رابط نون / أمازون (لينك العمولة) *</label><input id="p-link" value="${esc(ed?.link)}" placeholder="https://..." dir="ltr"></div>
@@ -258,6 +288,50 @@ function row(p){
     </div>`;
 }
 
+/* ===== upload to GitHub ===== */
+function fileToBase64(file){
+  return new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = () => rej(new Error('read failed'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function uploadToGitHub(file, onProgress){
+  const token = getToken();
+  if(!token) throw new Error('NO_TOKEN');
+
+  onProgress(15);
+  const b64 = await fileToBase64(file);
+  onProgress(40);
+
+  const safe = file.name.replace(/[^\w.\-]/g,'_');
+  const path = `images/${Date.now()}_${safe}`;
+
+  const res = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ message:`upload ${safe}`, content:b64, branch:GH_BRANCH })
+  });
+
+  onProgress(85);
+  if(!res.ok){
+    const t = await res.text();
+    console.error('GitHub error:', res.status, t);
+    if(res.status === 401) throw new Error('BAD_TOKEN');
+    if(res.status === 403 || res.status === 404) throw new Error('NO_ACCESS');
+    throw new Error('UPLOAD_FAILED');
+  }
+
+  onProgress(100);
+  return `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/${GH_BRANCH}/${path}`;
+}
+
 function wireUpload(dropId, fileId, barId, innerId, onDone){
   const drop = $(dropId), input = $(fileId), bar = $(barId), inner = $(innerId);
   drop.onclick = () => input.click();
@@ -267,33 +341,52 @@ function wireUpload(dropId, fileId, barId, innerId, onDone){
     if(e.dataTransfer.files[0]) handle(e.dataTransfer.files[0]); };
   input.onchange = () => { if(input.files[0]) handle(input.files[0]); };
 
-  function handle(file){
+  async function handle(file){
+    if(!getToken()){ toast('حط توكين GitHub الأول من فوق', true); return; }
     if(!file.type.startsWith('image/')){ toast('لازم تكون صورة', true); return; }
-    if(file.size > 5*1024*1024){ toast('الصورة أكبر من 5 ميجا', true); return; }
+    if(file.size > 8*1024*1024){ toast('الصورة أكبر من 8 ميجا', true); return; }
 
-    const path = `images/${Date.now()}_${file.name.replace(/[^\w.\-]/g,'_')}`;
-    const task = uploadBytesResumable(ref(storage, path), file);
-    bar.style.display = 'block';
+    bar.style.display='block';
     inner.textContent = 'جاري الرفع…';
+    const setP = v => bar.firstElementChild.style.width = v + '%';
 
-    task.on('state_changed',
-      s => bar.firstElementChild.style.width = (s.bytesTransferred/s.totalBytes*100)+'%',
-      err => { console.error(err); toast('فشل رفع الصورة — اتأكد من قواعد Storage', true);
-               bar.style.display='none'; inner.textContent='اضغط هنا لاختيار صورة'; },
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        bar.style.display='none';
-        inner.innerHTML = `<div class="prev"><img src="${url}"><span>تم الرفع — اضغط للتغيير</span></div>`;
-        onDone({ url, path });
-        toast('اترفعت الصورة');
-      }
-    );
+    try{
+      const url = await uploadToGitHub(file, setP);
+      bar.style.display='none'; setP(0);
+      inner.innerHTML = `<div class="prev"><img src="${url}"><span>تم الرفع — اضغط للتغيير</span></div>`;
+      onDone({ url });
+      toast('اترفعت الصورة ✓');
+    }catch(err){
+      bar.style.display='none'; setP(0);
+      inner.textContent = 'اضغط هنا لاختيار صورة';
+      const msgs = {
+        NO_TOKEN:'محتاج توكين GitHub',
+        BAD_TOKEN:'التوكين غلط أو منتهي',
+        NO_ACCESS:'التوكين مالوش صلاحية على الريبو ده',
+        UPLOAD_FAILED:'فشل الرفع — جرب تاني'
+      };
+      toast(msgs[err.message] || 'فشل الرفع', true);
+    }
   }
 }
 
 function bind(){
   $('logoutBtn').onclick = () => signOut(auth);
-  if($('cancelEdit')) $('cancelEdit').onclick = () => { editingId=null; pendingImage={url:'',path:''}; render(); };
+  if($('cancelEdit')) $('cancelEdit').onclick = () => { editingId=null; pendingImage={url:''}; render(); };
+
+  $('saveToken').onclick = () => {
+    const v = $('ghToken').value.trim();
+    if(!v){ toast('الصق التوكين الأول', true); return; }
+    setToken(v);
+    toast('اتحفظ التوكين ✓');
+    render();
+  };
+
+  $('clearToken').onclick = () => {
+    clearToken();
+    toast('اتمسح التوكين');
+    render();
+  };
 
   wireUpload('avatarDrop','avatarFile','avatarBar','avatarInner', r => pendingAvatar = r);
   wireUpload('prodDrop','prodFile','prodBar','prodInner', r => pendingImage = r);
@@ -309,7 +402,7 @@ function bind(){
     };
     try{
       await setDoc(doc(db,'config','settings'), settings);
-      pendingAvatar = {url:'',path:''};
+      pendingAvatar = {url:''};
       toast('اتحفظت بيانات الصفحة ✓');
     }catch(e){ console.error(e); toast('فشل الحفظ', true); }
     b.disabled=false; b.textContent='حفظ بيانات الصفحة';
@@ -327,8 +420,7 @@ function bind(){
       desc: $('p-desc').value.trim(),
       code: $('p-code').value.trim(),
       featured: $('p-feat').checked,
-      image: pendingImage.url || ed?.image || '',
-      imagePath: pendingImage.path || ed?.imagePath || ''
+      image: pendingImage.url || ed?.image || ''
     };
 
     const b = $('saveProduct'); b.disabled=true; b.textContent='جاري الحفظ…';
@@ -341,13 +433,13 @@ function bind(){
         await addDoc(collection(db,'products'), data);
         toast('اتضاف المنتج ✓');
       }
-      editingId=null; pendingImage={url:'',path:''};
+      editingId=null; pendingImage={url:''};
       await boot();
     }catch(e){ console.error(e); toast('فشل الحفظ', true); b.disabled=false; b.textContent='إضافة المنتج'; }
   };
 
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
-    editingId = b.dataset.edit; pendingImage={url:'',path:''};
+    editingId = b.dataset.edit; pendingImage={url:''};
     render(); window.scrollTo({top:0, behavior:'smooth'});
   });
 
@@ -364,7 +456,6 @@ function bind(){
     if(!confirm(`متأكد إنك عايز تمسح "${p.name}"؟`)) return;
     try{
       await deleteDoc(doc(db,'products',p.id));
-      if(p.imagePath){ try{ await deleteObject(ref(storage,p.imagePath)); }catch(e){} }
       products = products.filter(x=>x.id!==p.id);
       if(editingId===p.id) editingId=null;
       render(); toast('اتمسح المنتج');
